@@ -21,14 +21,17 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: '10mb' }));
 
 // Initialize Google Gemini Client on server-side
+const geminiApiKey = process.env.GEMINI_API_KEY || process.env.KNOWLEDGE_SYNCER || '';
+
 const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
+  apiKey: geminiApiKey,
   httpOptions: {
     headers: {
       'User-Agent': 'aistudio-build',
     },
   },
 });
+
 
 // Helper to extract YouTube video ID
 function extractYouTubeId(url: string): string | null {
@@ -73,6 +76,13 @@ async function fetchYouTubeMetadata(videoId: string) {
 // API: Synthesize YouTube Video
 app.post('/api/synthesize', async (req, res) => {
   try {
+    if (!geminiApiKey) {
+      return res.status(500).json({
+        error:
+          'GEMINI_API_KEY is not configured on the server. If deployed on Vercel, go to Settings > Environment Variables, add GEMINI_API_KEY with your key from https://aistudio.google.com/app/apikey, and trigger a Redeploy.',
+      });
+    }
+
     const { url, style = 'comprehensive', customFocus = '', targetAudience = 'all-levels' } = req.body;
     if (!url) {
       return res.status(400).json({ error: 'YouTube URL or Video ID is required.' });
@@ -274,9 +284,18 @@ Provide a rich, exhaustive, and pedagogically sound documentation payload.`;
     return res.json(finalDocument);
   } catch (error: any) {
     console.error('Synthesis error:', error);
-    return res.status(500).json({
-      error: error?.message || 'Failed to synthesize YouTube video. Please verify the URL.',
-    });
+    let errMsg = error?.message || 'Failed to synthesize YouTube video. Please verify the URL.';
+    if (
+      errMsg.includes('API_KEY_INVALID') ||
+      errMsg.includes('API key not valid') ||
+      errMsg.includes('API_KEY') ||
+      errMsg.includes('403') ||
+      errMsg.includes('400')
+    ) {
+      errMsg =
+        'Unauthorized or invalid Gemini API Key. Please verify that GEMINI_API_KEY in your Vercel Project Settings > Environment Variables is active and that your deployment has been redeployed.';
+    }
+    return res.status(500).json({ error: errMsg });
   }
 });
 
