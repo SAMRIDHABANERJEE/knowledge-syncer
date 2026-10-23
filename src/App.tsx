@@ -197,9 +197,16 @@ export default function App() {
 
       clearInterval(stepInterval);
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to synthesize video.');
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        let errorMsg = 'Failed to synthesize video.';
+        if (!contentType.includes('application/json')) {
+          errorMsg = `Backend API returned non-JSON response (HTTP ${res.status}). If deployed on Vercel, make sure serverless functions (/api/index.ts & vercel.json) are deployed, and GEMINI_API_KEY is configured in Vercel Project Settings > Environment Variables (and redeployed).`;
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          errorMsg = errData.error || `Server returned error (${res.status})`;
+        }
+        throw new Error(errorMsg);
       }
 
       const newDoc: SynthesizedDocument = await res.json();

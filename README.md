@@ -96,7 +96,7 @@ GEMINI_API_KEY="AIzaSy..."
 PORT=3000
 ```
 
-### Installation
+### Local Development
 ```bash
 # Clone the repository
 git clone https://github.com/autodoc-ai/autodoc-engine.git
@@ -108,6 +108,23 @@ npm install
 # Run the development server (Express + Vite)
 npm run dev
 ```
+
+### ⚡ Deploying to Vercel
+This repository includes a production-ready `vercel.json` and Serverless Function entrypoint (`/api/index.ts`):
+1. **Push your repository** to GitHub/GitLab.
+2. **Import into Vercel**:
+   - Framework Preset: **Vite**
+   - Root Directory: `./`
+   - Build Command: `npm run build`
+   - Output Directory: `dist`
+3. **Set Environment Variables in Vercel**:
+   - Go to **Project Settings > Environment Variables**
+   - Key: `GEMINI_API_KEY`
+   - Value: `Your_Actual_Gemini_API_Key`
+   - Ensure checkboxes for **Production**, **Preview**, and **Development** are checked.
+4. **Trigger a Redeployment**:
+   - In Vercel, navigate to the **Deployments** tab.
+   - Click the three dots `...` on the latest deployment and select **Redeploy** (important: Vercel does not inject newly added environment variables into existing builds without a redeploy!).
 
 ---
 

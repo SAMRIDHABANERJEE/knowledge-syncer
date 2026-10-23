@@ -216,7 +216,17 @@ ${document.glossary.map((g) => `- **${g.term}**: ${g.definition}`).join('\n')}
         }),
       });
 
-      if (!res.ok) throw new Error('Failed to get answer');
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        let errText = 'Failed to get answer.';
+        if (!contentType.includes('application/json')) {
+          errText = `Server returned non-JSON response (HTTP ${res.status}). Please verify backend/Vercel serverless functions.`;
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          errText = errData.error || `Error ${res.status}`;
+        }
+        throw new Error(errText);
+      }
       const data = await res.json();
       setChatMessages((prev) => [...prev, { role: 'assistant', content: data.reply }]);
       onAwardXp(5, 'Engaged in Grounded Q&A');
