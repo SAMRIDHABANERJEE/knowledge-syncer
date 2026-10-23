@@ -20,18 +20,23 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Initialize Google Gemini Client on server-side
-const geminiApiKey = process.env.GEMINI_API_KEY || process.env.KNOWLEDGE_SYNCER || '';
-
-const ai = new GoogleGenAI({
-  apiKey: geminiApiKey,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+// Lazy Google Gemini Client initializer to prevent cold-start crashes
+function getAiClient(): GoogleGenAI {
+  const geminiApiKey = process.env.GEMINI_API_KEY || process.env.KNOWLEDGE_SYNCER || '';
+  if (!geminiApiKey) {
+    throw new Error(
+      'GEMINI_API_KEY is not configured in environment variables. If deployed on Vercel, go to Settings > Environment Variables, add GEMINI_API_KEY with your key from Google AI Studio, and trigger a Redeploy.'
+    );
+  }
+  return new GoogleGenAI({
+    apiKey: geminiApiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
     },
-  },
-});
-
+  });
+}
 
 // Helper to extract YouTube video ID
 function extractYouTubeId(url: string): string | null {
@@ -73,15 +78,26 @@ async function fetchYouTubeMetadata(videoId: string) {
   };
 }
 
-// API: Synthesize YouTube Video
-app.post('/api/synthesize', async (req, res) => {
+// Express Router for API Endpoints (Supports both /api/path and /path on Vercel)
+const router = express.Router();
+
+// Health & Diagnostic Info
+router.get('/health', (_req, res) => {
+  const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.KNOWLEDGE_SYNCER);
+  res.json({
+    status: 'ok',
+    engine: 'AutoDoc-AI-Autonomous-Engine',
+    version: '2.4.0',
+    model: 'gemini-3.8-flash',
+    hasApiKey: hasKey,
+    features: ['youtube-oembed', 'structured-pdf', 'gamified-xp-system', 'interactive-quiz', 'mindmaps'],
+  });
+});
+
+// Synthesize YouTube Video
+router.post('/synthesize', async (req, res) => {
   try {
-    if (!geminiApiKey) {
-      return res.status(500).json({
-        error:
-          'GEMINI_API_KEY is not configured on the server. If deployed on Vercel, go to Settings > Environment Variables, add GEMINI_API_KEY with your key from https://aistudio.google.com/app/apikey, and trigger a Redeploy.',
-      });
-    }
+    const ai = getAiClient();
 
     const { url, style = 'comprehensive', customFocus = '', targetAudience = 'all-levels' } = req.body;
     if (!url) {
@@ -299,9 +315,11 @@ Provide a rich, exhaustive, and pedagogically sound documentation payload.`;
   }
 });
 
-// API: Grounded Q&A Chat with the Document
-app.post('/api/chat-document', async (req, res) => {
+// Grounded Q&A Chat with the Document
+router.post('/chat-document', async (req, res) => {
   try {
+    const ai = getAiClient();
+
     const { documentContext, question, chatHistory = [] } = req.body;
     if (!question || !documentContext) {
       return res.status(400).json({ error: 'Question and document context are required.' });
@@ -337,28 +355,31 @@ Answer the user's question clearly, pedagogically, and accurately based on the v
   }
 });
 
-// API: Get README.md content directly
-app.get('/api/readme', (_req, res) => {
+// Readme Content
+router.get('/readme', (_req, res) => {
   try {
     const readmePath = path.resolve(__dirname, 'README.md');
     if (fs.existsSync(readmePath)) {
       const content = fs.readFileSync(readmePath, 'utf-8');
       return res.json({ content });
     }
-    return res.status(404).json({ error: 'README.md not found.' });
+    return res.json({
+      content: '# AutoDoc AI — Autonomous YouTube Knowledge Engine\n\nFull documentation is available in the repository.',
+    });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
 });
 
-// API: Health & Engine Info
-app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    engine: 'AutoDoc-AI-Autonomous-Engine',
-    version: '2.4.0',
-    model: 'gemini-3.8-flash',
-    features: ['youtube-oembed', 'structured-pdf', 'gamified-xp-system', 'interactive-quiz', 'mindmaps'],
+// Mount router on both '/api' and '/' so Vercel rewrites work seamlessly
+app.use('/api', router);
+app.use('/', router);
+
+// Global Error Handler to guarantee JSON response
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled server error:', err);
+  res.status(500).json({
+    error: err?.message || 'Internal Server Error',
   });
 });
 
@@ -392,4 +413,3 @@ if (process.env.VERCEL !== '1') {
 }
 
 export default app;
-
