@@ -1,0 +1,6 @@
+{
+  "name": "AutoDoc AI — Autonomous YouTube to PDF Knowledge Engine",
+  "description": "Autonomous open-source AI engine that transforms YouTube video links into executive documentation, visual mindmaps, study notes, and downloadable PDFs with gamified rewards and skill progression.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
