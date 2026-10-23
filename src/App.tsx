@@ -18,6 +18,10 @@ import {
   calculateLevel,
   evaluateBadges,
   fireCelebrationConfetti,
+  loadUserScopedProgress,
+  saveUserScopedProgress,
+  getUserDocumentsKey,
+  mergeUserProgress,
 } from './utils/gamification';
 import { getStoredUser, saveUserSession } from './utils/auth';
 import { Award, Sparkles, X } from 'lucide-react';
@@ -29,9 +33,25 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'reauth'>('signin');
 
-  const [progress, setProgress] = useState<UserProgress>(getInitialProgress);
+  // Initialize progress with user-specific data if user session already exists
+  const [progress, setProgress] = useState<UserProgress>(() => {
+    const storedUser = getStoredUser();
+    if (storedUser?.email || storedUser?.uid) {
+      const userProgress = loadUserScopedProgress(storedUser.email || storedUser.uid);
+      if (userProgress) return userProgress;
+    }
+    return getInitialProgress();
+  });
+
+  // Initialize documents with user-specific library if user session exists
   const [documents, setDocuments] = useState<SynthesizedDocument[]>(() => {
+    const storedUser = getStoredUser();
     try {
+      if (storedUser?.email || storedUser?.uid) {
+        const userDocsKey = getUserDocumentsKey(storedUser.email || storedUser.uid);
+        const userSaved = localStorage.getItem(userDocsKey);
+        if (userSaved) return JSON.parse(userSaved);
+      }
       const saved = localStorage.getItem(LIBRARY_STORAGE_KEY);
       return saved ? JSON.parse(saved) : [];
     } catch {
@@ -41,6 +61,15 @@ export default function App() {
 
   const [activeDocument, setActiveDocument] = useState<SynthesizedDocument | null>(() => {
     try {
+      const storedUser = getStoredUser();
+      if (storedUser?.email || storedUser?.uid) {
+        const userDocsKey = getUserDocumentsKey(storedUser.email || storedUser.uid);
+        const userSaved = localStorage.getItem(userDocsKey);
+        if (userSaved) {
+          const list = JSON.parse(userSaved);
+          if (list.length > 0) return list[0];
+        }
+      }
       const saved = localStorage.getItem(LIBRARY_STORAGE_KEY);
       if (saved) {
         const list = JSON.parse(saved);
@@ -68,29 +97,101 @@ export default function App() {
   useEffect(() => {
     try {
       localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(documents));
+      if (currentUser?.email || currentUser?.uid) {
+        const userDocsKey = getUserDocumentsKey(currentUser.email || currentUser.uid);
+        localStorage.setItem(userDocsKey, JSON.stringify(documents));
+      }
     } catch (e) {
       console.warn('Failed to save library:', e);
     }
-  }, [documents]);
+  }, [documents, currentUser]);
 
   // Save progress whenever updated
   useEffect(() => {
-    saveProgress(progress);
-  }, [progress]);
+    saveUserScopedProgress(currentUser?.email || currentUser?.uid, progress);
+  }, [progress, currentUser]);
 
-  // Google Login Success
+  // Google Login Success: Restore and merge user progress & library
   const handleLoginSuccess = (user: UserProfile, isNewUser: boolean) => {
     setCurrentUser(user);
     saveUserSession(user);
+
+    const userKey = user.email || user.uid;
+    const existingUserProgress = loadUserScopedProgress(userKey);
+    let finalProgress = progress;
+
+    if (existingUserProgress) {
+      // Restore user progress and merge with any guest progress earned
+      finalProgress = mergeUserProgress(existingUserProgress, progress);
+    } else {
+      finalProgress = progress;
+    }
+
+    // Restore and merge user document library
+    let finalDocs = documents;
+    try {
+      const userDocsKey = getUserDocumentsKey(userKey);
+      let savedDocsRaw = localStorage.getItem(userDocsKey);
+      if (!savedDocsRaw) {
+        savedDocsRaw =
+          localStorage.getItem(LIBRARY_STORAGE_KEY) ||
+          localStorage.getItem('autodoc_documents_library');
+        if (savedDocsRaw) {
+          localStorage.setItem(userDocsKey, savedDocsRaw);
+        }
+      }
+
+      if (savedDocsRaw) {
+        const savedDocs: SynthesizedDocument[] = JSON.parse(savedDocsRaw);
+        const existingIds = new Set(documents.map((d) => d.id));
+        const nonDuplicateSaved = savedDocs.filter((d) => !existingIds.has(d.id));
+        finalDocs = [...documents, ...nonDuplicateSaved];
+      }
+    } catch (err) {
+      console.warn('Could not restore documents for user:', err);
+    }
+
+    // Ensure total synthesized count matches at least documents count
+    if (finalDocs.length > finalProgress.totalSynthesized) {
+      finalProgress = {
+        ...finalProgress,
+        totalSynthesized: finalDocs.length,
+      };
+    }
+
+    // Apply restored states
+    setProgress(finalProgress);
+    saveUserScopedProgress(userKey, finalProgress);
+
+    setDocuments(finalDocs);
+    if (finalDocs.length > 0) {
+      setActiveDocument(finalDocs[0]);
+    }
+
     const xpBonus = isNewUser ? 50 : 25;
-    awardXp(xpBonus, isNewUser ? 'Google Account Created' : 'Signed In with Google');
+    awardXp(xpBonus, isNewUser ? 'Google Account Connected' : 'Progress Restored');
     fireCelebrationConfetti();
+
+    // Confirmation Toast
+    setXpToast({
+      amount: xpBonus,
+      reason: `Welcome, ${user.name.split(' ')[0]}! Restored Level ${finalProgress.level} • ${finalProgress.xp} XP • ${finalDocs.length} Docs`,
+    });
   };
 
   // Reauthenticate Credentials Success
   const handleReauthenticateSuccess = (updatedUser: UserProfile) => {
     setCurrentUser(updatedUser);
     saveUserSession(updatedUser);
+
+    const userKey = updatedUser.email || updatedUser.uid;
+    const existingUserProgress = loadUserScopedProgress(userKey);
+    if (existingUserProgress) {
+      const merged = mergeUserProgress(existingUserProgress, progress);
+      setProgress(merged);
+      saveUserScopedProgress(userKey, merged);
+    }
+
     awardXp(15, 'Reauthenticated Login Credentials');
     fireCelebrationConfetti();
   };
@@ -107,9 +208,23 @@ export default function App() {
 
   // Google Sign Out
   const handleSignOut = () => {
+    const userKey = currentUser?.email || currentUser?.uid;
+    if (userKey) {
+      saveUserScopedProgress(userKey, progress);
+      const userDocsKey = getUserDocumentsKey(userKey);
+      try {
+        localStorage.setItem(userDocsKey, JSON.stringify(documents));
+      } catch {}
+    }
     setCurrentUser(null);
     saveUserSession(null);
-    setXpToast({ amount: 0, reason: 'Signed Out from Google' });
+
+    // Reset current workspace to guest initial baseline
+    setProgress(getInitialProgress());
+    setDocuments([]);
+    setActiveDocument(null);
+
+    setXpToast({ amount: 0, reason: 'Signed Out from Google. Session saved.' });
     setTimeout(() => {
       setXpToast(null);
     }, 2500);

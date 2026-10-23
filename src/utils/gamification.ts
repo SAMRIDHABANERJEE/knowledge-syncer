@@ -144,6 +144,108 @@ export function calculateLevel(xp: number) {
 
 const STORAGE_KEY = 'autodoc_user_progress_v2';
 
+export function getUserProgressKey(userIdOrEmail?: string): string {
+  if (!userIdOrEmail) return STORAGE_KEY;
+  const safeId = userIdOrEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `autodoc_user_progress_${safeId}`;
+}
+
+export function getUserDocumentsKey(userIdOrEmail?: string): string {
+  if (!userIdOrEmail) return 'autodoc_documents_library_v2';
+  const safeId = userIdOrEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `autodoc_user_docs_${safeId}`;
+}
+
+export function loadUserScopedProgress(userIdOrEmail?: string): UserProgress | null {
+  try {
+    const key = getUserProgressKey(userIdOrEmail);
+    let saved = localStorage.getItem(key);
+
+    // Fallback: check general storage keys if user-scoped key hasn't been written yet
+    if (!saved && userIdOrEmail) {
+      saved =
+        localStorage.getItem(STORAGE_KEY) ||
+        localStorage.getItem('autodoc_user_progress') ||
+        localStorage.getItem('autodoc_progress');
+      if (saved) {
+        try {
+          localStorage.setItem(key, saved);
+        } catch {}
+      }
+    }
+
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const { level, title, currentLevelBaseXp, nextLevelXp } = calculateLevel(parsed.xp || 0);
+      return {
+        xp: parsed.xp || 0,
+        level,
+        levelTitle: title,
+        currentLevelBaseXp,
+        nextLevelXp,
+        streakDays: parsed.streakDays || 1,
+        lastActiveDate: parsed.lastActiveDate || new Date().toISOString().split('T')[0],
+        totalSynthesized: parsed.totalSynthesized || 0,
+        totalQuizzesTaken: parsed.totalQuizzesTaken || 0,
+        perfectQuizzes: parsed.perfectQuizzes || 0,
+        totalPdfsExported: parsed.totalPdfsExported || 0,
+        totalFlashcardsFlipped: parsed.totalFlashcardsFlipped || 0,
+        unlockedBadges: Array.isArray(parsed.unlockedBadges) ? parsed.unlockedBadges : [],
+        selectedTheme: parsed.selectedTheme || 'academic',
+        unlockedPerks: Array.isArray(parsed.unlockedPerks) ? parsed.unlockedPerks : ['theme_academic'],
+      };
+    }
+  } catch (err) {
+    console.warn('Could not load user scoped progress:', err);
+  }
+  return null;
+}
+
+export function saveUserScopedProgress(userIdOrEmail: string | undefined, progress: UserProgress) {
+  try {
+    const key = getUserProgressKey(userIdOrEmail);
+    localStorage.setItem(key, JSON.stringify(progress));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  } catch (err) {
+    console.warn('Failed to save progress:', err);
+  }
+}
+
+// Merges guest session progress into restored user account progress cleanly & idempotently
+export function mergeUserProgress(base: UserProgress, guest: UserProgress): UserProgress {
+  // Take highest XP achieved so user progress is restored accurately without duplicate inflation
+  const mergedXp = Math.max(base.xp || 0, guest.xp || 0);
+  const { level, title, currentLevelBaseXp, nextLevelXp } = calculateLevel(mergedXp);
+  const mergedBadges = Array.from(
+    new Set([...(base.unlockedBadges || []), ...(guest.unlockedBadges || [])])
+  );
+  const mergedPerks = Array.from(
+    new Set([...(base.unlockedPerks || []), ...(guest.unlockedPerks || ['theme_academic'])])
+  );
+
+  return {
+    ...base,
+    xp: mergedXp,
+    level,
+    levelTitle: title,
+    currentLevelBaseXp,
+    nextLevelXp,
+    streakDays: Math.max(base.streakDays || 1, guest.streakDays || 1),
+    lastActiveDate: new Date().toISOString().split('T')[0],
+    totalSynthesized: Math.max(base.totalSynthesized || 0, guest.totalSynthesized || 0),
+    totalQuizzesTaken: Math.max(base.totalQuizzesTaken || 0, guest.totalQuizzesTaken || 0),
+    perfectQuizzes: Math.max(base.perfectQuizzes || 0, guest.perfectQuizzes || 0),
+    totalPdfsExported: Math.max(base.totalPdfsExported || 0, guest.totalPdfsExported || 0),
+    totalFlashcardsFlipped: Math.max(
+      base.totalFlashcardsFlipped || 0,
+      guest.totalFlashcardsFlipped || 0
+    ),
+    unlockedBadges: mergedBadges,
+    unlockedPerks: mergedPerks,
+    selectedTheme: guest.selectedTheme || base.selectedTheme || 'academic',
+  };
+}
+
 export function getInitialProgress(): UserProgress {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);

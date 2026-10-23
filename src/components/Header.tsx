@@ -15,6 +15,7 @@ import {
   ChevronDown,
   RotateCcw,
   ShieldCheck,
+  CheckCircle2,
 } from 'lucide-react';
 import { UserProgress, UserProfile } from '../types';
 import { GoogleIcon } from './GoogleAuthModal';
@@ -232,11 +233,19 @@ export const Header: React.FC<HeaderProps> = ({
                       </div>
                     </div>
 
-                    <div className="p-2 bg-slate-950 rounded-xl mb-2 text-xs flex items-center justify-between">
-                      <span className="text-slate-400">Progress Rank</span>
-                      <span className="font-bold text-indigo-400">
-                        Level {progress.level} ({progress.xp} XP)
-                      </span>
+                    <div className="p-2.5 bg-slate-950 rounded-xl mb-2 text-xs space-y-1.5 border border-slate-800/80">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Progress Rank</span>
+                        <span className="font-bold text-indigo-400">
+                          Level {progress.level} ({progress.xp} XP)
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-900 text-[11px]">
+                        <span className="text-slate-500">Account Sync</span>
+                        <span className="text-emerald-400 font-medium flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Restored & Protected
+                        </span>
+                      </div>
                     </div>
 
                     {/* Reauthenticate Button */}
